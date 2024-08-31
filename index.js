@@ -84,7 +84,7 @@ const upload = multer({ storage: storage });
 // Route to add a person
 app.post('/people', (req, res) => {
   const { name } = req.body;
-
+console.log(`Adding ${name}`)
   db.query('INSERT INTO people (name) VALUES (?)', [name], (err, result) => {
     if (err) {
       console.error('Error inserting person:', err);
