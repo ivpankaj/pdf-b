@@ -10,13 +10,8 @@ const port = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use('/',(req,res)=>{
-  console.log("i said hello");
-})
 app.use('/uploads', express.static('uploads'));
-app.use((req, res) => {
-  res.status(404).json({ message: 'You are hitting the wrong API URL' });
-});
+
 // MySQL Connection
 const db = mysql.createConnection({
   host: 'localhost',
@@ -50,7 +45,7 @@ db.connect((err) => {
     )
   `;
 
-  db.query(createPeopleTable, (err, result) => {
+  db.query(createPeopleTable, (err) => {
     if (err) {
       console.error('Error creating people table:', err);
       return;
@@ -58,7 +53,7 @@ db.connect((err) => {
     console.log('Table `people` is ready');
   });
 
-  db.query(createFilesTable, (err, result) => {
+  db.query(createFilesTable, (err) => {
     if (err) {
       console.error('Error creating files table:', err);
       return;
@@ -87,7 +82,7 @@ const upload = multer({ storage: storage });
 // Route to add a person
 app.post('/people', (req, res) => {
   const { name } = req.body;
-console.log(`Adding ${name}`)
+  console.log(`Adding ${name}`);
   db.query('INSERT INTO people (name) VALUES (?)', [name], (err, result) => {
     if (err) {
       console.error('Error inserting person:', err);
@@ -122,7 +117,7 @@ app.post('/upload', upload.single('pdf'), (req, res) => {
     db.query(
       'INSERT INTO files (file_path, file_name, title, people_id) VALUES (?, ?, ?, ?)',
       [filePath, fileName, title, peopleId],
-      (err, result) => {
+      (err) => {
         if (err) {
           console.error('Error inserting file details:', err);
           return res.status(500).json({ error: 'Database error' });
@@ -147,7 +142,7 @@ app.get('/files/:personName', (req, res) => {
 
     if (results.length === 0) {
       return res.status(404).json({ error: 'Person not found' });
-    } 
+    }
 
     const peopleId = results[0].id;
 
@@ -163,4 +158,7 @@ app.get('/files/:personName', (req, res) => {
   });
 });
 
-
+// 404 Middleware
+app.use((req, res) => {
+  res.status(404).json({ message: 'You are hitting the wrong API URL' });
+});
