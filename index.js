@@ -1,5 +1,5 @@
 const express = require('express');
-const mysql = require('mysql2');
+const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const cors = require('cors');
@@ -12,60 +12,36 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
-// MySQL Connection
-const db = mysql.createConnection({
-  host: 'localhost',
-  user: 'root',
-  password: '',
-  database: 'pdf2',
+// MongoDB Connection
+mongoose.connect('mongodb+srv://pankajdosso21:7AoSG7J8yN8187Ws@cluster0.h5kht.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', {
+
 });
 
-db.connect((err) => {
-  if (err) {
-    console.error('Database connection error:', err);
-    return;
-  }
-  console.log('Connected to MySQL');
+const db = mongoose.connection;
+db.on('error', console.error.bind(console, 'Database connection error:'));
+db.once('open', () => {
+  console.log('Connected to MongoDB');
 
-  const createPeopleTable = `
-    CREATE TABLE IF NOT EXISTS people (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(255) NOT NULL
-    )
-  `;
-
-  const createFilesTable = `
-    CREATE TABLE IF NOT EXISTS files (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      file_path VARCHAR(255) NOT NULL,
-      file_name VARCHAR(255) NOT NULL,
-      title VARCHAR(255) NOT NULL,
-      people_id INT,
-      FOREIGN KEY (people_id) REFERENCES people(id) ON DELETE CASCADE
-    )
-  `;
-
-  db.query(createPeopleTable, (err) => {
-    if (err) {
-      console.error('Error creating people table:', err);
-      return;
-    }
-    console.log('Table `people` is ready');
-  });
-
-  db.query(createFilesTable, (err) => {
-    if (err) {
-      console.error('Error creating files table:', err);
-      return;
-    }
-    console.log('Table `files` is ready');
-
-    // Start the server after ensuring the tables are created
-    app.listen(port, () => {
-      console.log(`Server running on port ${port}`);
-    });
+  // Start the server after ensuring the connection is established
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
   });
 });
+
+// Define Schemas and Models
+const personSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+});
+
+const fileSchema = new mongoose.Schema({
+  filePath: { type: String, required: true },
+  fileName: { type: String, required: true },
+  title: { type: String, required: true },
+  peopleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Person', required: true },
+});
+
+const Person = mongoose.model('Person', personSchema);
+const File = mongoose.model('File', fileSchema);
 
 // Multer Setup
 const storage = multer.diskStorage({
@@ -80,82 +56,62 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // Route to add a person
-app.post('/people', (req, res) => {
+app.post('/people', async (req, res) => {
   const { name } = req.body;
-  console.log(`Adding ${name}`);
-  db.query('INSERT INTO people (name) VALUES (?)', [name], (err, result) => {
-    if (err) {
-      console.error('Error inserting person:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    res.json({ id: result.insertId, name: name });
-  });
+  try {
+    const person = new Person({ name });
+    await person.save();
+    res.json({ id: person._id, name });
+  } catch (err) {
+    console.error('Error inserting person:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Upload PDF with title, person name, and person ID
-app.post('/upload', upload.single('pdf'), (req, res) => {
+app.post('/upload', upload.single('pdf'), async (req, res) => {
   const filePath = `/uploads/${req.file.filename}`;
   const fileName = req.file.originalname;
   const title = req.body.title;
   const personName = req.body.personName;
 
-  // Find the person by name
-  db.query('SELECT id FROM people WHERE name = ?', [personName], (err, results) => {
-    if (err) {
-      console.error('Error finding person:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    if (results.length === 0) {
+  try {
+    const person = await Person.findOne({ name: personName }).exec();
+    if (!person) {
       return res.status(404).json({ error: 'Person not found' });
     }
 
-    const peopleId = results[0].id;
+    const file = new File({
+      filePath,
+      fileName,
+      title,
+      peopleId: person._id,
+    });
 
-    // Insert file details into MySQL database
-    db.query(
-      'INSERT INTO files (file_path, file_name, title, people_id) VALUES (?, ?, ?, ?)',
-      [filePath, fileName, title, peopleId],
-      (err) => {
-        if (err) {
-          console.error('Error inserting file details:', err);
-          return res.status(500).json({ error: 'Database error' });
-        }
-
-        res.json({ filePath: filePath, fileName: fileName, title: title, peopleId: peopleId });
-      }
-    );
-  });
+    await file.save();
+    res.json({ filePath, fileName, title, peopleId: person._id });
+  } catch (err) {
+    console.error('Error inserting file details:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Get all PDFs by person name
-app.get('/files/:personName', (req, res) => {
+app.get('/files/:personName', async (req, res) => {
   const personName = req.params.personName;
 
-  // Find the person by name
-  db.query('SELECT id FROM people WHERE name = ?', [personName], (err, results) => {
-    if (err) {
-      console.error('Error finding person:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    if (results.length === 0) {
+  try {
+    const person = await Person.findOne({ name: personName }).exec();
+    if (!person) {
       return res.status(404).json({ error: 'Person not found' });
     }
 
-    const peopleId = results[0].id;
-
-    // Query to get all files by person ID
-    db.query('SELECT id, file_name, title, file_path FROM files WHERE people_id = ?', [peopleId], (err, results) => {
-      if (err) {
-        console.error('Error retrieving files:', err);
-        return res.status(500).json({ error: 'Database error' });
-      }
-
-      res.json(results);
-    });
-  });
+    const files = await File.find({ peopleId: person._id }).exec();
+    res.json(files);
+  } catch (err) {
+    console.error('Error retrieving files:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // 404 Middleware
